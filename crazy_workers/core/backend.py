@@ -12,6 +12,7 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 
 from .engine import is_worker_process, read_spawned_parameters, terminate_process, worker_key_token
 
@@ -23,6 +24,23 @@ logger = logging.getLogger('crazy_workers')
 # (bad import, syntax error, missing module). Keep it small so spawn stays
 # responsive.
 _STARTUP_GRACE_SECONDS = 0.05
+
+_ESSENTIAL_ENV_KEYS = {
+  'COMSPEC',
+  'HOME',
+  'LANG',
+  'LC_ALL',
+  'PATH',
+  'PATHEXT',
+  'PYTHONPATH',
+  'SYSTEMROOT',
+  'TEMP',
+  'TMP',
+  'TZ',
+  'USERPROFILE',
+  'VIRTUAL_ENV',
+  'WINDIR',
+}
 
 
 class WorkerHandle:
@@ -60,15 +78,19 @@ class ProcessBackend:
 class SubprocessBackend(ProcessBackend):
   """Default backend: each worker runs as an independent OS process."""
 
-  def spawn(self, *, worker_key, worker_type, worker_path, parameters, env, log_path):
-    child_env = os.environ.copy()
-    if env:
-      child_env.update(env)
+  def __init__(self, *, log_destination='file', inherited_env_keys=None):
+    if log_destination not in ('file', 'stdout'):
+      raise ValueError("log_destination must be 'file' or 'stdout'")
+    self.log_destination = log_destination
+    self.inherited_env_keys = None if inherited_env_keys is None else {key.upper() for key in inherited_env_keys}
 
-    log_fh = self._open_log(worker_key, log_path)
+  def spawn(self, *, worker_key, worker_type, worker_path, parameters, env, log_path):
+    child_env = self._build_child_env(env)
+
+    log_fh = self._open_log(worker_key, log_path) if self.log_destination == 'file' else None
     # log_fh ownership is transferred to Popen; Popen duplicates it via os.dup2,
     # so we close our copy right after spawning.
-    dest = log_fh if log_fh else subprocess.DEVNULL
+    dest = subprocess.PIPE if self.log_destination == 'stdout' else (log_fh if log_fh else subprocess.DEVNULL)
 
     process = subprocess.Popen(
       [
@@ -81,18 +103,47 @@ class SubprocessBackend(ProcessBackend):
         json.dumps(parameters),
       ],
       stdout=dest,
-      stderr=dest,
+      stderr=subprocess.STDOUT if self.log_destination == 'stdout' else dest,
       text=True,
+      bufsize=1,
       env=child_env,
     )
     if log_fh:
       log_fh.close()
+
+    if self.log_destination == 'stdout':
+      self._start_output_forwarder(process, worker_key)
 
     if self._died_immediately(process, worker_key):
       return None
 
     logger.info(f'Worker {worker_key} started with PID {process.pid}')
     return WorkerHandle(process.pid, process)
+
+  def _build_child_env(self, explicit_env):
+    if self.inherited_env_keys is None:
+      child_env = os.environ.copy()
+    else:
+      inherited = _ESSENTIAL_ENV_KEYS | self.inherited_env_keys
+      child_env = {key: value for key, value in os.environ.items() if key.upper() in inherited}
+    child_env.update(explicit_env or {})
+    return child_env
+
+  def _start_output_forwarder(self, process, worker_key):
+    worker_logger = logging.getLogger(f'crazy_workers.worker.{worker_key}')
+
+    def forward_output():
+      if process.stdout is None:
+        return
+      try:
+        for line in process.stdout:
+          worker_logger.info(line.rstrip('\r\n'))
+      finally:
+        process.stdout.close()
+
+    thread = threading.Thread(target=forward_output, name=f'crazy-workers-log-{worker_key}', daemon=True)
+    thread.start()
+    return thread
 
   def is_alive(self, *, pid, worker_key):
     return is_worker_process(pid, worker_key)

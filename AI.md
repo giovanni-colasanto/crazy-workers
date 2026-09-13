@@ -9,7 +9,7 @@
 - **Testing Integrity**: Never modify the codebase solely to facilitate a test. If a test is difficult to write, refactor for better observability or improve the test setup.
 - **Linting & Formatting**: Always run `ruff check . --fix` and `ruff format .` after any code change.
 - **Testing**: Always run `pytest` after changes.
-- **Coverage**: Ensure total coverage stays above 90% (soglia della pipeline, in `pyproject.toml`). New code must be covered by tests. Each individual file must maintain a minimum coverage of 75%.
+- **Coverage**: Ensure total coverage stays above 90% (the pipeline threshold configured in `pyproject.toml`). New code must be covered by tests. Each individual file must maintain a minimum coverage of 75%.
 - **Clean Tests**: Tests must be clean, readable, and strictly free of `print()` statements. Use assertions for verification.
 - **No Silent Exceptions**: Avoid broad `except Exception: pass` blocks. Catch only specific, expected exception types. Each exception handler must either log the error, propagate it, or have an explicit comment explaining why silence is correct.
 - **Documentation Maintenance**: After every development cycle, review and update `README.md`, `CLI.md`, and this file. Ensure all functional changes, new configurations, and architectural shifts are accurately reflected.
@@ -24,6 +24,7 @@ tests/
   base.py                   # BaseTestCase with process leak detection
   test_params.py            # crazy_workers/params.py (worker-side parse_params)
   core/
+    test_backend.py         # SubprocessBackend environment and stdout forwarding
     test_engine.py          # crazy_workers/core/engine.py
     test_recovery.py        # crazy_workers/core/recovery.py
     manager/
@@ -53,6 +54,7 @@ tests/
     test_client.py          # crazy_workers/client.py (control-plane WorkerClient)
   daemon/
     test_main.py            # crazy_workers/daemon/__main__.py and runner.py
+    test_lock.py            # local and PostgreSQL single-owner daemon locks
     test_reconciler.py      # crazy_workers/daemon/reconciler.py (incl. parameter-drift recycle)
   database/
     test_storage.py         # crazy_workers/database/storage.py

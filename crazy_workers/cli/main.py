@@ -57,7 +57,30 @@ def _build_parser():
   params_parser.add_argument('worker_key', nargs='?', help='The key of the worker')
 
   daemon_parser = subparsers.add_parser('daemon', help='Run the reconcile loop (owns the worker processes)')
+  daemon_parser.add_argument(
+    '--db-url',
+    help='Shared DB URL (defaults to CRAZY_WORKERS_DB_URL, else local SQLite)',
+  )
   daemon_parser.add_argument('--interval', type=float, default=2.0, help='Seconds between reconcile passes')
+  daemon_parser.add_argument('--log-level', help='Daemon log level (defaults to CRAZY_WORKERS_LOG_LEVEL or INFO)')
+  daemon_parser.add_argument(
+    '--log-destination',
+    choices=('file', 'stdout'),
+    help='Write worker output to files or daemon stdout (defaults to CRAZY_WORKERS_LOG_DESTINATION or file)',
+  )
+  daemon_parser.add_argument(
+    '--worker-env-allow',
+    help='Comma-separated application environment variables workers may inherit',
+  )
+  daemon_parser.add_argument(
+    '--lock-name',
+    help='PostgreSQL advisory-lock namespace (defaults to CRAZY_WORKERS_LOCK_NAME or the absolute workers-dir)',
+  )
+  daemon_parser.add_argument(
+    '--stop-workers-on-exit',
+    action='store_true',
+    help='Stop child processes on daemon shutdown without changing desired state',
+  )
 
   return parser
 
@@ -79,7 +102,8 @@ def main():
   # Only `start` (lists/validates the worker scripts) and the daemon (owns them)
   # truly need the workers dir. With a shared DB, status/stop/params work without
   # it, so we must not block on the interactive prompt (see CRAZY_WORKERS_DB_URL).
-  needs_dir = args.command in ('start', 'daemon') or _db_url() is None
+  remote_explicit_start = args.command == 'start' and args.worker_type and _db_url() is not None
+  needs_dir = args.command == 'daemon' or _db_url() is None or (args.command == 'start' and not remote_explicit_start)
   workers_dir = resolve_workers_dir(args.workers_dir, required=needs_dir)
 
   # The daemon is the process owner, not a client — it builds its own manager.
@@ -87,9 +111,18 @@ def main():
     from ..daemon.runner import main as daemon_main
 
     argv = ['--workers-dir', workers_dir, '--interval', str(args.interval)]
-    db_url = _db_url()
-    if db_url:
-      argv += ['--db-url', db_url]
+    if args.db_url is not None:
+      argv += ['--db-url', args.db_url]
+    if args.log_level is not None:
+      argv += ['--log-level', args.log_level]
+    if args.log_destination is not None:
+      argv += ['--log-destination', args.log_destination]
+    if args.worker_env_allow is not None:
+      argv += ['--worker-env-allow', args.worker_env_allow]
+    if args.lock_name:
+      argv += ['--lock-name', args.lock_name]
+    if args.stop_workers_on_exit:
+      argv.append('--stop-workers-on-exit')
     sys.exit(daemon_main(argv))
 
   try:

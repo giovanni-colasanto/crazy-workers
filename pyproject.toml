@@ -1,6 +1,6 @@
 [project]
 name = "crazy-workers"
-version = "1.6.1"
+version = "1.7.0"
 description = "A Python library for managing background worker processes with persistent state, automatic recovery, and a CLI."
 readme = "README.md"
 authors = [{ name = "GioVanni Colasanto" }]
@@ -60,7 +60,7 @@ python_functions = ["test_*"]
 
 [tool.coverage.run]
 source = ["crazy_workers"]
-omit = ["*/venv/*", "*/build/*", "tests/*"]
+omit = ["*/venv/*", "*/build/*", "tests/*", "*__main__.py"]
 
 [tool.coverage.report]
 show_missing = true

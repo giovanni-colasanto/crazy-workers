@@ -82,3 +82,17 @@ class TestCliCommandStarter(BaseTestCase):
           cli_main()
         self.assertEqual(cm.exception.code, 1)
         self.assertIn('Invalid JSON', fake_err.getvalue())
+
+  def test_remote_explicit_start_does_not_require_local_worker_files(self):
+    db_url = f'sqlite:///{os.path.join(self.test_dir, "remote.db")}'
+    with WorkerClient(db_url=db_url, create_tables=True):
+      pass
+
+    with patch.dict(os.environ, {'CRAZY_WORKERS_DB_URL': db_url}, clear=True):
+      with patch('sys.argv', ['crazy-workers', 'start', 'remote_worker', '--key', 'remote_1']):
+        with patch('sys.stdout', new=StringIO()) as fake_out:
+          cli_main()
+
+    self.assertIn('Requested', fake_out.getvalue())
+    with WorkerClient(db_url=db_url) as client:
+      self.assertEqual(client.get('remote_1')['worker_type'], 'remote_worker')

@@ -26,7 +26,7 @@ def start_worker(client, workers_dir, worker_type, worker_key=None, parameters=N
     worker_type = files[choice - 1]
 
   # Surface a typo here rather than as a daemon CRASHED/retry loop later.
-  if not os.path.exists(os.path.join(workers_dir, f'{worker_type}.py')):
+  if workers_dir is not None and not os.path.exists(os.path.join(workers_dir, f'{worker_type}.py')):
     err_console().print(f'[bold red]Error:[/bold red] Worker file {worker_type}.py not found in {workers_dir}')
     return False
 
