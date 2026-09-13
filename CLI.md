@@ -79,6 +79,9 @@ crazy-workers start example_worker --key job_1
 # With parameters (must be a valid JSON string)
 crazy-workers start example_worker --params '{"duration": 30, "mode": "fast"}'
 
+# Remote daemon: the explicit type is trusted and validated by the daemon
+CRAZY_WORKERS_DB_URL=postgresql://... crazy-workers start example_worker
+
 # Interactive selection
 crazy-workers start
 ```
@@ -93,6 +96,12 @@ Re-running `start` on a worker that is already RUNNING updates its spec: if the
 new `--params` differ from the ones the live process was spawned with, the
 daemon recycles it (stop, then restart with the new parameters) within a couple
 of reconcile passes. Identical parameters leave the process untouched.
+
+When `CRAZY_WORKERS_DB_URL` is set and the worker type is explicit, `start`
+does not require a local copy of the workers directory. This lets an operator
+control a container or remote daemon through the shared database. Interactive
+selection still requires the scripts locally; the process-owning daemon always
+performs the authoritative file and name validation.
 
 ---
 
@@ -126,11 +135,51 @@ crazy-workers params
 
 ---
 
-> **No `restore` command.** Recovery after a machine reboot is automatic: using
-> crazy-workers to start a worker installs a per-user OS boot hook that runs it
-> for you (see [Automatic boot-restore](README.md#automatic-boot-restore)). In
-> code, `manager.recover_workers()` is still available for in-app crash
-> recovery.
+> **No `restore` command.** In the recommended deployment, systemd or the
+> container runtime restarts the reconcile daemon and desired state restores
+> the workers. Embedded deployments can opt into the legacy OS boot hook with
+> `WorkerManager(..., auto_boot=True)`.
+
+### `daemon`
+
+Runs the reconcile loop as a foreground process and owns all worker subprocesses
+for one worker directory and database. Because `--workers-dir` is a global
+option, place it before the `daemon` command:
+
+```bash
+crazy-workers --workers-dir /app/workers daemon \
+  --db-url postgresql://user:password@database/app \
+  --interval 2 \
+  --log-level INFO \
+  --log-destination stdout \
+  --worker-env-allow DATABASE_URL,STATIC_FOLDER \
+  --lock-name application-workers \
+  --stop-workers-on-exit
+```
+
+| Option | Environment variable | Default |
+|--------|----------------------|---------|
+| `--workers-dir PATH` | `CRAZY_WORKERS_DIR` | Required existing directory. The flag takes precedence. |
+| `--db-url URL` | `CRAZY_WORKERS_DB_URL` | Local SQLite database under `.service/`. |
+| `--interval SECONDS` | — | `2.0`. |
+| `--log-level LEVEL` | `CRAZY_WORKERS_LOG_LEVEL` | `INFO`. |
+| `--log-destination file\|stdout` | `CRAZY_WORKERS_LOG_DESTINATION` | `file`. |
+| `--worker-env-allow KEY1,KEY2` | `CRAZY_WORKERS_ENV_ALLOWLIST` | Inherit the complete daemon environment. |
+| `--lock-name NAME` | `CRAZY_WORKERS_LOCK_NAME` | Absolute path of the workers directory. |
+| `--stop-workers-on-exit` | `CRAZY_WORKERS_STOP_WORKERS_ON_EXIT` | Disabled. The environment value accepts `1`, `true`, `yes`, or `on`. |
+
+Explicit value-taking flags override environment variables; omitted options
+fall back to their environment defaults. `--stop-workers-on-exit` and its
+environment variable can enable the shutdown behaviour. PostgreSQL-backed
+daemon locks require PostgreSQL 11 or newer because they use
+`hashtextextended`. On older servers lock acquisition fails and the daemon
+exits.
+
+When an environment allowlist is active, application variables are denied
+unless named explicitly. In particular, add `CRAZY_WORKERS_DB_URL` if the
+worker code itself reads it; the daemon using that variable does not implicitly
+make it available to children. Portable runtime variables are always retained;
+the complete list is documented in the README container section.
 
 ---
 

@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from crazy_workers.daemon.runner import _install_signal_handlers
+from crazy_workers.daemon.runner import _env_flag, _install_signal_handlers, _stop_running_workers
 from crazy_workers.daemon.runner import main as daemon_main
 
 
@@ -59,3 +59,31 @@ class TestDaemonMain(unittest.TestCase):
 
     handler(signal.SIGTERM, None)
     reconciler.stop.assert_called_once()
+
+  def test_stop_running_workers_preserves_desired_state_contract(self):
+    manager = MagicMock()
+    manager.list_workers.return_value = [
+      {'worker_key': 'running', 'status': 'RUNNING'},
+      {'worker_key': 'stopped', 'status': 'STOPPED'},
+    ]
+    manager.stop_worker.return_value = (True, 'stopped')
+
+    _stop_running_workers(manager)
+
+    manager.stop_worker.assert_called_once_with('running')
+
+  def test_stop_running_workers_logs_failure(self):
+    manager = MagicMock()
+    manager.list_workers.return_value = [{'worker_key': 'running', 'status': 'RUNNING'}]
+    manager.stop_worker.return_value = (False, 'permission denied')
+
+    with self.assertLogs('crazy_workers', level='WARNING') as logs:
+      _stop_running_workers(manager)
+
+    self.assertIn('permission denied', logs.output[0])
+
+  def test_env_flag_accepts_only_explicit_truthy_values(self):
+    with patch.dict(os.environ, {'CW_FLAG': 'yes'}):
+      self.assertTrue(_env_flag('CW_FLAG'))
+    with patch.dict(os.environ, {'CW_FLAG': 'no'}):
+      self.assertFalse(_env_flag('CW_FLAG'))

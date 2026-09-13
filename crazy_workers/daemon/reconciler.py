@@ -51,14 +51,19 @@ class Reconciler:
   evidence, not on a guess.
   """
 
-  def __init__(self, manager, interval=2.0):
+  def __init__(self, manager, interval=2.0, owner_guard=None):
     self.manager = manager
     self.interval = interval
+    self.owner_guard = owner_guard
     self._stop = False
 
   def run_forever(self):
     logger.info('Reconciler started (interval=%ss)', self.interval)
     while not self._stop:
+      if self.owner_guard is not None and not self.owner_guard():
+        logger.error('Daemon ownership was lost; stopping the reconciler.')
+        self.stop()
+        break
       try:
         self.reconcile_once()
       except Exception:
@@ -73,8 +78,11 @@ class Reconciler:
 
   def _interruptible_sleep(self, seconds):
     deadline = time.monotonic() + seconds
-    while not self._stop and time.monotonic() < deadline:
-      time.sleep(min(0.2, deadline - time.monotonic()))
+    while not self._stop:
+      remaining = deadline - time.monotonic()
+      if remaining <= 0:
+        break
+      time.sleep(min(0.2, remaining))
 
   def reconcile_once(self):
     """One pass over every worker. Returns the actions taken (for tests/observability)."""

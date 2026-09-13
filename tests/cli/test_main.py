@@ -94,6 +94,66 @@ class TestCliMain(BaseTestCase):
       self.assertIn(self.workers_path, called_argv)
       self.assertIn('0.5', called_argv)
 
+  def test_cli_daemon_preserves_env_log_destination_default(self):
+    with patch('crazy_workers.daemon.runner.main', return_value=0) as daemon_main:
+      argv = ['crazy-workers', '--workers-dir', self.workers_path, 'daemon']
+      with patch.dict(os.environ, {'CRAZY_WORKERS_LOG_DESTINATION': 'stdout'}, clear=True):
+        with patch('sys.argv', argv):
+          with self.assertRaises(SystemExit) as cm:
+            cli_main()
+
+    self.assertEqual(cm.exception.code, 0)
+    called_argv = daemon_main.call_args.args[0]
+    self.assertNotIn('--log-destination', called_argv)
+    self.assertNotIn('file', called_argv)
+
+  def test_cli_daemon_forwards_all_explicit_runtime_options(self):
+    with patch('crazy_workers.daemon.runner.main', return_value=0) as daemon_main:
+      argv = [
+        'crazy-workers',
+        '--workers-dir',
+        self.workers_path,
+        'daemon',
+        '--db-url',
+        'postgresql://database/workers',
+        '--interval',
+        '0.5',
+        '--log-level',
+        'DEBUG',
+        '--log-destination',
+        'stdout',
+        '--worker-env-allow',
+        'DATABASE_URL,STATIC_FOLDER',
+        '--lock-name',
+        'application-workers',
+        '--stop-workers-on-exit',
+      ]
+      with patch('sys.argv', argv):
+        with self.assertRaises(SystemExit) as cm:
+          cli_main()
+
+    self.assertEqual(cm.exception.code, 0)
+    self.assertEqual(
+      daemon_main.call_args.args[0],
+      [
+        '--workers-dir',
+        self.workers_path,
+        '--interval',
+        '0.5',
+        '--db-url',
+        'postgresql://database/workers',
+        '--log-level',
+        'DEBUG',
+        '--log-destination',
+        'stdout',
+        '--worker-env-allow',
+        'DATABASE_URL,STATIC_FOLDER',
+        '--lock-name',
+        'application-workers',
+        '--stop-workers-on-exit',
+      ],
+    )
+
   def test_cli_status_with_shared_db_url(self):
     # Point the CLI at a shared DB (as lotec-be/generic-deploy do) via env var.
     url = self._sqlite_url()

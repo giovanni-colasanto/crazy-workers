@@ -12,7 +12,7 @@ A Python library for managing background worker processes with persistent state,
 - **Process Management** — Start, stop, and monitor background Python scripts as independent OS processes.
 - **Automatic Recovery** — Detects crashed workers and restarts them on application boot.
 - **Reconcile Daemon** — A single-owner loop (`python -m crazy_workers.daemon`) drives actual state toward the desired state that clients (`WorkerClient`, CLI) write to the shared database: it starts and stops workers, restarts crashes with exponential backoff, and recycles a running worker whose parameters changed in the database — the process is never left silently running with a stale spec.
-- **Automatic Boot-Restore** — On Linux and Windows, starting a worker transparently installs a per-user OS hook (a systemd user unit / a logon Scheduled Task) that runs recovery after a machine reboot — no host application required. Opt out with `CRAZY_WORKERS_NO_BOOT`. See [Automatic boot-restore](#automatic-boot-restore).
+- **Optional Boot-Restore** — Embedded deployments can opt into a per-user OS hook (a systemd user unit / a logon Scheduled Task). Daemon and container deployments leave restart ownership to systemd or the container runtime. See [Automatic boot-restore](#automatic-boot-restore).
 - **Child Process Control** — On stop, terminates unmanaged subprocesses while preserving independently-managed nested workers.
 - **CLI Interface** — Manage workers from the terminal with interactive prompts and auto-discovery (see [CLI.md](https://github.com/Vanni-broUser/crazy-workers/blob/main/CLI.md)).
 - **Security** — Worker types and keys are restricted to a safe identifier charset (`A-Z a-z 0-9 _ -`), with a defence-in-depth check that the resolved script path stays inside the workers directory. This blocks path traversal on both Unix and Windows (including drive-relative names like `c:evil`).
@@ -101,7 +101,7 @@ See [CLI.md](https://github.com/Vanni-broUser/crazy-workers/blob/main/CLI.md) fo
 | `workers_dir` | `str` | `'workers'` | Directory containing worker `.py` scripts |
 | `create_dir` | `bool` | `True` | Create `workers_dir` and `.service/` if they don't exist |
 | `backend` | `ProcessBackend` | `None` | Process backend; the default spawns real subprocesses (tests inject a fake) |
-| `auto_boot` | `bool` | `True` | Install the per-user OS boot-restore hook on first start — see [Automatic boot-restore](#automatic-boot-restore) |
+| `auto_boot` | `bool` | `False` | Opt into the legacy per-user OS boot-restore hook — see [Automatic boot-restore](#automatic-boot-restore) |
 | `boot_provider` | `BootProvider` | `None` | Override the boot-restore mechanism (mainly a test seam) |
 | `db_url` | `str` | `None` | SQLAlchemy URL for worker state; defaults to SQLite under `.service/` |
 | `engine` | `Engine` | `None` | Reuse an existing SQLAlchemy engine so the tables live in your database; **not** disposed by crazy_workers |
@@ -348,11 +348,61 @@ When using a pre-fork server like Gunicorn:
 - **Recovery is atomic** — a file lock (`.service/workers.db.recovery.lock`) ensures `recover_workers()` runs once even when multiple workers boot simultaneously.
 - **Workers outlive their parent** — if a Gunicorn worker is recycled, background processes keep running. The next recovery cycle re-attaches or restarts them.
 
+## Container daemon
+
+Run one daemon process as the container entrypoint and let it supervise every
+worker subprocess in that container:
+
+~~~bash
+python -m crazy_workers.daemon \
+  --workers-dir /app/workers \
+  --db-url "$DATABASE_URL" \
+  --lock-name my-application-workers \
+  --log-destination stdout \
+  --stop-workers-on-exit \
+  --worker-env-allow DATABASE_URL,STATIC_FOLDER
+~~~
+
+With PostgreSQL, the daemon holds a database advisory lock keyed by the current
+database and `--lock-name`. A second container for the same logical worker
+group exits instead of racing the first. PostgreSQL 11 or newer is required
+because the lock key uses `hashtextextended`; on an older server lock
+acquisition fails and the daemon exits. SQLite and other self-contained
+deployments retain the host-local PID lock.
+
+Ownership is checked once per reconcile pass. If the PostgreSQL lock connection
+is lost, the old daemon exits at its next check instead of reconnecting without
+ownership. A replacement can acquire the released lock immediately, so during
+failover there can be a brief overlap (normally up to the reconcile interval,
+2 seconds by default, plus the current pass) before the old daemon stops its
+workers. The lock prevents steady-state split brain; it is not a zero-overlap
+handover protocol.
+
+`--log-destination stdout` forwards every worker line through a logger named
+`crazy_workers.worker.<worker_key>`, making `docker logs` a single,
+filterable stream. File logging remains the default for compatibility.
+
+By default workers inherit the daemon environment. Supplying
+`--worker-env-allow` switches to least-privilege inheritance: only portable
+runtime variables plus the named application variables reach worker
+subprocesses. The always-retained runtime keys are `COMSPEC`, `HOME`, `LANG`,
+`LC_ALL`, `PATH`, `PATHEXT`, `PYTHONPATH`, `SYSTEMROOT`, `TEMP`, `TMP`, `TZ`,
+`USERPROFILE`, `VIRTUAL_ENV`, and `WINDIR`. Application variables are not
+implicit: for example, a worker that reads `CRAZY_WORKERS_DB_URL` must name it
+in the allowlist. Values explicitly passed through `WorkerManager.worker_env`
+or per-start `env` are always included.
+
+`--stop-workers-on-exit` gracefully terminates the supervised subprocesses
+when the daemon receives SIGTERM while leaving their desired state RUNNING.
+The replacement container therefore restarts them cleanly. It is opt-in
+because host daemons may intentionally leave workers alive across a daemon
+upgrade.
+
 ## Automatic boot-restore
 
-Starting a worker transparently installs a **per-user OS hook** for its workers
-directory, so workers come back after a reboot without any host application
-running. The hook calls the internal entrypoint `python -m crazy_workers.boot
+Embedded deployments may opt into a **per-user OS hook** for their workers
+directory by constructing `WorkerManager(..., auto_boot=True)`. The hook calls
+the internal entrypoint `python -m crazy_workers.boot
 --workers-dir <dir>`, which runs `recover_workers()`. The install is
 best-effort and happens at most once per directory (a marker lives in
 `.service/boot.json`); a failure never blocks the worker from starting and is
@@ -376,13 +426,23 @@ this is PID-reuse safe). But running it *without any login* depends on the OS:
 `crazy-workers status` always reports whether the hook runs **at boot** or
 **at login**, so this is never silently wrong.
 
-**Opting out.** Set `CRAZY_WORKERS_NO_BOOT` (any non-empty value) to disable the
-automatic install entirely — useful in containers, CI, or when you manage boot
-yourself. You can also pass `WorkerManager(..., auto_boot=False)`.
+Boot hooks are disabled by default. Even when `auto_boot=True`, setting
+`CRAZY_WORKERS_NO_BOOT` disables installation entirely.
 
 ## Logs
 
-Each worker's stdout/stderr is appended to `.service/logs/<worker_key>.log`. These files are written directly by the worker process, so the library does **not** rotate them — they grow until you act. For long-lived deployments, rotate them externally (e.g. `logrotate` with `copytruncate`) or have your worker script configure its own `logging.handlers.RotatingFileHandler` instead of writing to stdout/stderr.
+With the default `file` log destination, each worker's stdout/stderr is appended
+to `.service/logs/<worker_key>.log`. These files are written directly by the
+worker process, so the library does **not** rotate them — they grow until you
+act. For long-lived deployments, rotate them externally (e.g. `logrotate` with
+`copytruncate`) or have your worker script configure its own
+`logging.handlers.RotatingFileHandler` instead of writing to stdout/stderr.
+
+With `--log-destination stdout` (or
+`CRAZY_WORKERS_LOG_DESTINATION=stdout`), no per-worker file is created. Worker
+output is forwarded to the daemon logger as described in
+[Container daemon](#container-daemon), so the process supervisor or container
+runtime owns collection and rotation.
 
 ## Development
 

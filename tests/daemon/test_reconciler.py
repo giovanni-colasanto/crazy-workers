@@ -3,6 +3,7 @@ import shutil
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 from crazy_workers import WorkerClient, WorkerManager
 from crazy_workers.daemon.reconciler import Reconciler
@@ -42,6 +43,14 @@ class _ReconcilerTestBase(unittest.TestCase):
 
 
 class TestReconcileTable(_ReconcilerTestBase):
+  def test_run_forever_stops_before_reconciling_when_ownership_is_lost(self):
+    reconciler = Reconciler(self.manager, interval=0.01, owner_guard=lambda: False)
+    self.client.request_start('example_worker', worker_key='w1')
+
+    reconciler.run_forever()
+
+    self.assertFalse(self.backend.is_running('w1'))
+
   def test_running_and_dead_starts(self):
     self.client.request_start('example_worker', worker_key='w1')
     actions = self.reconciler.reconcile_once()
@@ -284,6 +293,28 @@ class TestReconcileParameterDrift(_ReconcilerTestBase):
 
 
 class TestReconcilerLoop(_ReconcilerTestBase):
+  def test_interruptible_sleep_never_uses_negative_duration(self):
+    slept = []
+
+    def record_sleep(seconds):
+      self.assertGreaterEqual(seconds, 0)
+      slept.append(seconds)
+
+    with (
+      patch(
+        'crazy_workers.daemon.reconciler.time.monotonic',
+        side_effect=[10.0, 10.05, 10.2],
+      ),
+      patch(
+        'crazy_workers.daemon.reconciler.time.sleep',
+        side_effect=record_sleep,
+      ),
+    ):
+      self.reconciler._interruptible_sleep(0.1)
+
+    self.assertEqual(len(slept), 1)
+    self.assertAlmostEqual(slept[0], 0.05)
+
   def test_run_forever_runs_until_stopped(self):
     calls = []
 
