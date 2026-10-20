@@ -41,9 +41,9 @@ dev = [
 [project.urls]
 "Homepage" = "https://crazy-workers.com"
 "Documentation" = "https://crazy-workers.com/docs"
-"Source" = "https://github.com/Vanni-broUser/crazy-workers"
-"Bug Tracker" = "https://github.com/Vanni-broUser/crazy-workers/issues"
-"Funding" = "https://github.com/sponsors/Vanni-broUser"
+"Source" = "https://github.com/giovanni-colasanto/crazy-workers"
+"Bug Tracker" = "https://github.com/giovanni-colasanto/crazy-workers/issues"
+"Funding" = "https://github.com/sponsors/giovanni-colasanto"
 
 [build-system]
 requires = ["setuptools>=61.0"]
