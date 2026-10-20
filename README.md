@@ -14,7 +14,7 @@ A Python library for managing background worker processes with persistent state,
 - **Reconcile Daemon** — A single-owner loop (`python -m crazy_workers.daemon`) drives actual state toward the desired state that clients (`WorkerClient`, CLI) write to the shared database: it starts and stops workers, restarts crashes with exponential backoff, and recycles a running worker whose parameters changed in the database — the process is never left silently running with a stale spec.
 - **Optional Boot-Restore** — Embedded deployments can opt into a per-user OS hook (a systemd user unit / a logon Scheduled Task). Daemon and container deployments leave restart ownership to systemd or the container runtime. See [Automatic boot-restore](#automatic-boot-restore).
 - **Child Process Control** — On stop, terminates unmanaged subprocesses while preserving independently-managed nested workers.
-- **CLI Interface** — Manage workers from the terminal with interactive prompts and auto-discovery (see [CLI.md](https://github.com/Vanni-broUser/crazy-workers/blob/main/CLI.md)).
+- **CLI Interface** — Manage workers from the terminal with interactive prompts and auto-discovery (see [CLI.md](https://github.com/giovanni-colasanto/crazy-workers/blob/main/CLI.md)).
 - **Security** — Worker types and keys are restricted to a safe identifier charset (`A-Z a-z 0-9 _ -`), with a defence-in-depth check that the resolved script path stays inside the workers directory. This blocks path traversal on both Unix and Windows (including drive-relative names like `c:evil`).
 - **Observability** — Per-worker file logging; all service files (DB, lock, logs) live in a `.service/` folder inside your workers directory.
 - **Zombie Protection** — Distinguishes active processes from zombies using `psutil`.
@@ -31,7 +31,7 @@ pip install crazy-workers
 Or from source:
 
 ```bash
-git clone https://github.com/Vanni-broUser/crazy-workers
+git clone https://github.com/giovanni-colasanto/crazy-workers
 cd crazy-workers
 pip install .
 ```
@@ -90,7 +90,7 @@ crazy-workers start my_worker --key job_1 --params '{"duration": 30}'
 crazy-workers stop job_1
 ```
 
-See [CLI.md](https://github.com/Vanni-broUser/crazy-workers/blob/main/CLI.md) for full CLI documentation.
+See [CLI.md](https://github.com/giovanni-colasanto/crazy-workers/blob/main/CLI.md) for full CLI documentation.
 
 ## API Reference
 
@@ -170,7 +170,7 @@ A worker is a separate process, so it cannot be handed a live object (e.g. a DB
 connection). Pass **configuration** instead: the manager's `worker_env` (and any
 per-call `env`) is injected as environment variables, so a worker reads, say,
 `os.environ['DATABASE_URL']` and opens its own connection. See
-[`example_app/workers/db_writer.py`](https://github.com/Vanni-broUser/crazy-workers/blob/main/example_app/workers/db_writer.py).
+[`example_app/workers/db_writer.py`](https://github.com/giovanni-colasanto/crazy-workers/blob/main/example_app/workers/db_writer.py).
 
 ## Testing your app
 
@@ -310,7 +310,7 @@ def create_app(db_engine, db_url):
   return app
 ```
 
-See [`example_app/app.py`](https://github.com/Vanni-broUser/crazy-workers/blob/main/example_app/app.py) for a complete example.
+See [`example_app/app.py`](https://github.com/giovanni-colasanto/crazy-workers/blob/main/example_app/app.py) for a complete example.
 
 ## Backend integration
 
@@ -329,7 +329,7 @@ the project instead of living off to the side:
   ordering — the table must exist before the manager queries it, so build the
   manager *after* your migrations run (and keep `auto_recover=False` until then,
   since recovery reads that table). See the `workers` schema in
-  [`crazy_workers/database/schema.py`](https://github.com/Vanni-broUser/crazy-workers/blob/main/crazy_workers/database/schema.py)
+  [`crazy_workers/database/schema.py`](https://github.com/giovanni-colasanto/crazy-workers/blob/main/crazy_workers/database/schema.py)
   for the columns your migration must create.
 - **Give workers the connection they need.** A worker is a separate process, so
   it can't receive a live DB connection — pass the *configuration* instead.
@@ -449,7 +449,7 @@ runtime owns collection and rotation.
 ### Setup
 
 ```bash
-git clone https://github.com/Vanni-broUser/crazy-workers
+git clone https://github.com/giovanni-colasanto/crazy-workers
 cd crazy-workers
 pip install -e .[dev]
 ```
@@ -469,14 +469,14 @@ coverage run -m pytest && coverage report
 
 ### Standards
 
-See [AI.md](https://github.com/Vanni-broUser/crazy-workers/blob/main/AI.md) for the full coding and testing standards used in this project.
+See [AI.md](https://github.com/giovanni-colasanto/crazy-workers/blob/main/AI.md) for the full coding and testing standards used in this project.
 
 ## Support the project ❤️
 
 crazy-workers is free and open-source (MIT). If it saves you time or powers your work,
 consider supporting its development:
 
-- **GitHub Sponsors** — recurring or one-time, 0% platform fee: https://github.com/sponsors/Vanni-broUser
+- **GitHub Sponsors** — recurring or one-time, 0% platform fee: https://github.com/sponsors/giovanni-colasanto
 - **Stripe** — one-time card donation via secure checkout: https://buy.stripe.com/dRmeVdbiw2bD1HN5jscZa00
 - **⭐ Star the repo** — free, and it really helps visibility.
 
